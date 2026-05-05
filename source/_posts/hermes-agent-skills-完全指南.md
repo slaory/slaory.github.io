@@ -1,0 +1,222 @@
+---
+title: Hermes Agent Skills 完全指南：从概念到实践的 7 个维度
+date: 2026-05-05 10:40:00
+categories:
+  - 工具指南
+tags:
+  - Hermes Agent
+  - Skills
+  - AI工具
+---
+
+> 如果你正在使用 Hermes Agent，这篇文章会帮你理解它的核心能力之一——Skills 机制。通过它，Agent 可以从"每次从零推理"进化为"积累经验，形成可复用流程"。
+
+**官方文档**: [Skills System](https://hermes-agent.nousresearch.com/docs/user-guide/features/skills) | **GitHub**: [NousResearch/hermes-agent](https://github.com/NousResearch/hermes-agent)
+
+---
+
+## 一、概念定位：Skills 是什么
+
+**Skills** 是 Hermes Agent 的**技能文档**机制，本质是一组 Markdown 文件（SKILL.md），包含触发条件、执行步骤、精确命令和避坑指南。
+
+当你解决了一个复杂问题、发现了一个新的工作流，或者被用户纠正了做法，Agent 可以把这段经验保存为 Skill。下次遇到类似任务时，直接加载对应的 Skill 来执行，而不是重新推理一遍流程。
+
+这和传统的工具调用不同：
+
+- **工具（Tool）**：执行单一操作，比如"搜索文件"、"执行命令"
+- **Skill**：封装一整套**可复用的工作流程**，包含经验、坑点和最佳实践
+
+Skills 存放在 `~/.hermes/skills/` 目录下（用户本地），也可以存在于 Hermes Agent 源码仓库的 `skills/` 目录（共享发布）。
+
+官方还提供了完整的 [Creating Skills 开发指南](https://hermes-agent.nousresearch.com/docs/developer-guide/creating-skills)。
+
+---
+
+## 二、生命周期：Skill 如何运作
+
+每个 Skill 的生命周期分为四个阶段：
+
+### 1. 创建（Create）
+
+复杂任务成功完成后，Agent 会主动提议保存为 Skill。创建方式有两种：
+
+```bash
+# 从 Hub 安装现成 Skill
+hermes skills install <skill-name>
+
+# 在 Hermes CLI 中用 /skill 加载，或通过 API 调用 skill_manage 工具
+```
+
+创建时必须包含 YAML frontmatter，定义 name、description、tags。
+
+### 2. 加载（Load）
+
+| 方式 | 命令 | 适用场景 |
+|------|------|----------|
+| 手动加载 | `/skill <name>` 或 `hermes -s <name>` | 明确知道要用哪个 Skill |
+| 自动匹配 | Agent 根据 description 自动推断 | 不确定该用哪个，Agent 推理后决定 |
+| 启动时预加载 | `hermes --skills skill1,skill2` | 固定要用的 Skill |
+
+### 3. 执行（Execute）
+
+Skill 被加载后，其内容（步骤、命令、坑点）作为上下文注入到 Agent 的系统提示中。Agent 在执行任务时会遵循 Skill 中定义的流程，而不是每次从零思考。
+
+### 4. 管理（Manage）
+
+```bash
+hermes skills list              # 列出已安装的 Skills
+hermes skills search <keyword>  # 在 Hub 中搜索
+hermes skills inspect <name>    # 预览 Skill 内容（不安装）
+hermes skills uninstall <name>   # 卸载
+hermes skills publish <name>     # 发布到 Hub
+```
+
+---
+
+## 三、文件结构：SKILL.md 的组成
+
+每个 Skill 是一个文件夹，其中 SKILL.md 是核心文件。结构如下：
+
+```
+skills/
+└── <category>/
+    └── <skill-name>/
+        ├── SKILL.md           # 必选，主文件
+        ├── references/        # 可选，参考资料
+        ├── templates/         # 可选，模板文件
+        └── scripts/           # 可选，自动化脚本
+```
+
+### SKILL.md 标准格式
+
+官方文档参考：[Skills System # SKILL.md Format](https://hermes-agent.nousresearch.com/docs/user-guide/features/skills#skillmd-format)
+
+标准的 SKILL.md 包含：
+
+```yaml
+---
+name: my-skill-name               # 小写，hyphens，≤64 字符
+description: Use when <具体场景>   # ≤1024 字符，必须以 "Use when" 开头
+tags: [category, scope]            # 可选，分类标签
+---
+```
+
+### 关键约束
+
+| 字段 | 限制 |
+|------|------|
+| name | ≤ 64 字符，小写加连字符 |
+| description | ≤ 1024 字符，必须以 "Use when" 开头 |
+| 全文 | ≤ 100,000 字符（建议 8-15k 字符） |
+
+---
+
+## 四、触发机制：何时自动加载 Skill
+
+Skills 的触发分为两类：
+
+### 显式触发
+
+```bash
+hermes -s my-skill          # 启动时加载
+/skill my-skill             # 会话中加载
+```
+
+### 自动触发（模糊匹配）
+
+Agent 根据 Skill 的 description 字段自动判断当前任务是否匹配。Description 的写法直接影响触发准确性：
+
+**好的写法：**
+
+```yaml
+description: Use when debugging test failures in CI pipelines. Investigates root cause before proposing fixes.
+```
+
+**差的写法：**
+
+```yaml
+description: Debug tests.  # 太宽泛，无法准确触发
+```
+
+---
+
+## 五、Skills 与其他持久化机制的区别
+
+Hermes Agent 提供了多种跨会话记忆机制，但定位不同：
+
+| 机制 | 存储内容 | 适用场景 | 持久性 |
+|------|----------|----------|--------|
+| Skills | 可复用的工作流程、知识、坑点 | API 调用顺序、配置步骤、复杂任务 SOP | 永久（直到删除） |
+| Memory | 事实性信息（偏好、环境、设置） | "用户喜欢简洁回答"、"mmx CLI 路径" | 永久（手动管理） |
+| Session | 对话历史和上下文 | 跨会话恢复之前的工作状态 | 会话间可选保留 |
+| Cron Jobs | 定时任务定义 | 周期性数据收集、监控告警 | 永久（直到删除） |
+| Profiles | 独立配置集 | 多用户/多项目隔离 | 永久（手动管理） |
+
+核心区别：
+
+- **Memory** 存的是事实（Who/What/Where）
+- **Skills** 存的是流程（How）
+
+---
+
+## 六、实践方法：如何写一个高质量的 Skill
+
+最好的学习方法是从现有的 Skill 入手：
+
+```bash
+# 预览一个 Skill（不安装）
+hermes skills inspect <name>
+
+# 查看已安装 Skill 的结构
+ls ~/.hermes/skills/<category>/<name>/
+```
+
+### 1. 从 Trigger 开始写
+
+先想清楚：这个 Skill 在什么情况下被使用？描述要具体到"当用户做 X 时"。
+
+### 2. 步骤要精确到命令级
+
+不要写"然后配置一下"，要写具体的命令和参数。Agent 执行时不会自己猜。
+
+### 3. 坑点（Pitfalls）最有价值
+
+记录"这样做会出错"的场景，比如：
+
+> **常见坑点 1：使用 `git + curl` 而非 `gh`**
+> 在某些环境下 git credential helper 不稳定，建议优先使用 `gh api` 接口。
+
+### 4. 写完后自检
+
+- [ ] 运行 `hermes skills list` 确认 Skill 已安装
+- [ ] 执行 `hermes skills inspect <name>` 确认内容正确
+- [ ] 在新会话中 `/skill <name>` 验证可正常加载
+- [ ] 这个流程 3 个月后我还能复现吗？
+- [ ] 坑点有没有写全？
+
+---
+
+## 七、官方资源与下一步
+
+| 资源 | 链接 |
+|------|------|
+| Skills System（总览） | https://hermes-agent.nousresearch.com/docs/user-guide/features/skills |
+| Creating Skills（编写指南） | https://hermes-agent.nousresearch.com/docs/developer-guide/creating-skills |
+| Bundled Skills Catalog | https://hermes-agent.nousresearch.com/docs/reference/skills-catalog |
+| Optional Skills Catalog | https://hermes-agent.nousresearch.com/docs/reference/optional-skills-catalog |
+| GitHub 仓库 | https://github.com/NousResearch/hermes-agent |
+| CLI 命令参考 | https://hermes-agent.nousresearch.com/docs/reference/cli-commands |
+
+建议从今天就开始积累：**每完成一个复杂任务，就问自己——"这个流程值得存为 Skill 吗？"**
+
+如果答案是肯定的，用 `hermes skills publish` 分享到 Hub，让社区也能受益。
+
+---
+
+## 总结
+
+Skills 是 Hermes Agent 从"通用推理引擎"走向"经验积累型助手"的关键机制。它让 Agent 能够：
+
+1. 记住成功的流程，而不是每次从零推理
+2. 分享坑点，避免重复踩坑
+3. 复用最佳实践，一键加载专业级工作流
